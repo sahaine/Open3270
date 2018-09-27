@@ -1,143 +1,200 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Drawing;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Windows.Forms;
-using Open3270;
-
-namespace SampleForm
+﻿namespace SampleForm
 {
-    public class OpenEmulator : RichTextBox
-    {
-        public TNEmulator TN3270 = new TNEmulator();
-        private bool IsRedrawing = false;
-        public void Connect(string Server, int Port, string Type, bool UseSsl)
-        {
-            TN3270.Config.UseSSL = UseSsl;
-            TN3270.Config.TermType = Type;
-            TN3270.Connect(Server, Port, string.Empty);
+   using Open3270;
+   using System;
+   using System.Diagnostics;
+   using System.Drawing;
+   using System.Windows.Forms;
 
+   public class OpenEmulator : RichTextBox
+   {
+      private readonly TNEmulator TN3270 = new TNEmulator();
+
+      private bool IsRedrawing;
+
+      private Size _inital;
+
+
+      public void Connect(string Server, int Port, string Type, bool UseSsl)
+      {
+         
+
+         TN3270.Config.UseSSL = UseSsl;
+         TN3270.Config.TermType = Type;
+         TN3270.Connect(Server, Port, string.Empty);
+
+         Redraw();
+      }
+
+      public void Redraw()
+      {
+         var Render = new RichTextBox(); // { Text = TN3270.CurrentScreenXML.Dump() };
+
+         for (var i = 0; i < TN3270.CurrentScreenXML.CY; i++)
+         {
+            Render.Text += TN3270.CurrentScreenXML.GetRow(i).PadRight(TN3270.CurrentScreenXML.CX, ' ') + "\r\n";
+         }
+
+         Clear();
+
+         var fnt = new Font("Consolas", 10);
+         Render.Font = new Font(fnt, FontStyle.Regular);
+
+         IsRedrawing = true;
+         Render.SelectAll();
+
+         if (TN3270.CurrentScreenXML.Fields == null)
+         {
+            var clr = Color.Lime;
+            Render.SelectionProtected = false;
+            Render.SelectionColor = clr;
+            Render.DeselectAll();
+
+            for (var i = 0; i < Render.Text.Length; i++)
+            {
+               Render.Select(i, 1);
+               if (Render.SelectedText != " " && Render.SelectedText != "\n")
+               {
+                  Render.SelectionColor = Color.Lime;
+               }
+            }
+
+            return;
+         }
+
+         foreach (var field in TN3270.CurrentScreenXML.Fields)
+         {
+            // if (string.IsNullOrEmpty(field.Text))
+            // continue;
+            Application.DoEvents();
+            var textClr = Color.Lime;
+            var backClr = Color.Black;
+            var protect = true;
+
+            if (field.Attributes.FieldType == "High" && field.Attributes.Protected)
+            {
+               textClr = Color.White;
+            }
+            else if (field.Attributes.FieldType == "High")
+            {
+               textClr = Color.Red;
+               backClr = Color.LightGray ;
+               protect = false;
+            }
+            else if (field.Attributes.FieldType == "Hidden")
+            {
+               textClr = Color.Black ;
+               backClr = Color.LightGray;
+               protect = false;
+            }
+            else if (field.Attributes.Protected)
+            {
+               textClr = Color.RoyalBlue;
+            }
+
+            Debug.WriteLine(field.Attributes.FieldType);
+
+            Render.Select(field.Location.position + field.Location.top, field.Location.length);
+            Render.SelectionProtected = false;
+            Render.SelectionColor = textClr;
+            Render.SelectionBackColor = backClr;
+
+            if (protect)
+            {
+               Render.SelectionProtected = true;
+            }
+         }
+
+         for (var i = 0; i < Render.Text.Length; i++)
+         {
+            Render.Select(i, 1);
+            if (Render.SelectedText != " " && Render.SelectedText != "\n" && Render.SelectionColor == Color.Black)
+            {
+               Render.SelectionProtected = false;
+               Render.SelectionColor = Color.Lime;
+            }
+         }
+
+         this.Rtf = Render.Rtf;
+
+         IsRedrawing = false;
+      }
+
+      protected override void OnKeyDown(KeyEventArgs e)
+      {
+         if (e.KeyCode == Keys.Back)
+         {
+            this.SelectionStart--;
+            e.Handled = true;
+            return;
+         }
+
+         if (e.KeyCode == Keys.Tab)
+         {
+            // TN3270.SetCursor();
+            e.Handled = true;
+            return;
+         }
+      }
+
+      protected override void OnKeyPress(KeyPressEventArgs e)
+      {
+         if (e.KeyChar == '\r')
+         {
+            TN3270.SendKey(true, TnKey.Enter, 1000);
             Redraw();
-        }
-        public void Redraw()
-        {
-            RichTextBox Render = new RichTextBox();
-            Render.Text = TN3270.CurrentScreenXML.Dump();
+            e.Handled = true;
+            return;
+         }
 
-            this.Clear();
-            Font fnt = new System.Drawing.Font("Consolas", 10);
-            Render.Font = new System.Drawing.Font(fnt, FontStyle.Regular);
+         if (e.KeyChar == '\b')
+         {
+            return;
+         }
 
-            IsRedrawing = true;
-            Render.SelectAll();
+         if (e.KeyChar == '\t')
+         {
+            return;
+         }
 
-            if (TN3270.CurrentScreenXML.Fields == null)
+         TN3270.SetText(e.KeyChar.ToString());
+         base.OnKeyPress(e);
+      }
+
+      protected override void OnSelectionChanged(EventArgs e)
+      {
+         if (TN3270.IsConnected)
+         {
+            base.OnSelectionChanged(e);
+            if (!IsRedrawing)
             {
-                Color clr = Color.Lime;
-                Render.SelectionProtected = false;
-                Render.SelectionColor = clr;
-                Render.DeselectAll();
+               int i = this.SelectionStart, x, y = 0;
+               while (i >= 81)
+               {
+                  y++;
+                  i -= 81;
+               }
 
-                for (int i = 0; i < Render.Text.Length; i++)
-                {
-                    Render.Select(i, 1);
-                    if (Render.SelectedText != " " && Render.SelectedText != "\n")
-                        Render.SelectionColor = Color.Lime;
-                }
-                return;
+               x = i;
 
-                Render.SelectionStart = (TN3270.CursorY) * 80 + TN3270.CursorX;
+               TN3270.SetCursor(x, y);
             }
+         }
+      }
 
-            Render.SelectionProtected = true;
-            foreach (Open3270.TN3270.XMLScreenField field in TN3270.CurrentScreenXML.Fields)
-            {
-                //if (string.IsNullOrEmpty(field.Text))
-                //    continue;
+      protected override void OnSizeChanged(EventArgs e)
+      {
 
-                System.Windows.Forms.Application.DoEvents();
-                Color clr = Color.Lime;
-                if (field.Attributes.FieldType == "High" && field.Attributes.Protected)
-                    clr = Color.White;
-                else if (field.Attributes.FieldType == "High")
-                    clr = Color.Red;
-                else if (field.Attributes.Protected)
-                    clr = Color.RoyalBlue;
+         if (_inital == Size.Empty)
+         {
+            _inital = Size;
+            return;
+         }
 
-                Render.Select(field.Location.position + field.Location.top, field.Location.length);
-                Render.SelectionProtected = false;
-                Render.SelectionColor = clr;
-                if (clr == Color.White || clr == Color.RoyalBlue)
-                    Render.SelectionProtected = true;
-            }
+         var vZoom = Height / (float)_inital.Height;
+         var hZoom = Width / (float)_inital.Width;
 
-            for (int i = 0; i < Render.Text.Length; i++)
-            {
-                Render.Select(i, 1);
-                if (Render.SelectedText != " " && Render.SelectedText != "\n" && Render.SelectionColor == Color.Black)
-                {
-                    Render.SelectionProtected = false;
-                    Render.SelectionColor = Color.Lime;
-                }
-            }
-
-            this.Rtf = Render.Rtf;
-
-            IsRedrawing = false;
-        }
-
-        protected override void OnKeyDown(KeyEventArgs e)
-        {
-            if (e.KeyCode == Keys.Back)
-            {
-                this.SelectionStart--;
-                e.Handled = true;
-                return;
-            }
-            if (e.KeyCode == Keys.Tab)
-            {
-                //TN3270.SetCursor();
-                e.Handled = true;
-                return;
-            }
-        }
-        protected override void OnKeyPress(KeyPressEventArgs e)
-        {
-            if (e.KeyChar == '\r')
-            {
-                TN3270.SendKey(true, TnKey.Enter, 1000);
-                Redraw();
-                e.Handled = true;
-                return;
-            }
-            if (e.KeyChar == '\b')
-                return;
-            if (e.KeyChar == '\t')
-                return;
-
-            TN3270.SetText(e.KeyChar.ToString());
-            base.OnKeyPress(e);
-        }
-        protected override void OnSelectionChanged(EventArgs e)
-        {
-            if (TN3270.IsConnected)
-            {
-                base.OnSelectionChanged(e);
-                if (!IsRedrawing)
-                {
-                    int i = this.SelectionStart, x, y = 0;
-                    while (i >= 81)
-                    {
-                        y++;
-                        i -= 81;
-                    }
-                    x = i;
-
-                    TN3270.SetCursor(x, y);
-                }
-            }
-        }
-    }
+         ZoomFactor = (hZoom > vZoom ?  vZoom : hZoom);
+      }
+   }
 }
